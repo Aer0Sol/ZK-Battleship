@@ -1,0 +1,10 @@
+/target/
+/build/
+/circuits/node_modules/
+/net/__pycache__/
+*.py[cod]
+.env
+.aws/
+.agents/
+.codex/
+zk-battleship-opponent.zip
