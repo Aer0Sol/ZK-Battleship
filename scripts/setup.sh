@@ -15,17 +15,17 @@ SNARKJS="$CIRCUITS/node_modules/.bin/snarkjs"
 echo "==> Compiling shot.circom..."
 circom "$CIRCUITS/shot.circom" \
     --r1cs --wasm --sym \
-    --include "$CIRCUITS" \
+    -l "$CIRCUITS/node_modules" \
     -o "$BUILD"
 echo "    Constraints: $(grep -c 'constraint' "$BUILD/shot.sym" 2>/dev/null || echo 'see shot.r1cs')"
 
 PTAU="$BUILD/pot15_final.ptau"
 if [ ! -f "$PTAU" ]; then
     echo "==> Running powers of tau ceremony..."
-    "$SNARKJS" powersoftau new bn128 15 "$BUILD/pot15_0000.ptau" -v
+    "$SNARKJS" powersoftau new bn128 15 "$BUILD/pot15_0000.ptau"
     "$SNARKJS" powersoftau contribute "$BUILD/pot15_0000.ptau" "$BUILD/pot15_0001.ptau" \
         --name="ZK-Battleship setup" -e="zkbattleship entropy $(date)"
-    "$SNARKJS" powersoftau prepare phase2 "$BUILD/pot15_0001.ptau" "$PTAU" -v
+    "$SNARKJS" powersoftau prepare phase2 "$BUILD/pot15_0001.ptau" "$PTAU"
 fi
 
 echo "==> Running Groth16 phase-2 setup..."

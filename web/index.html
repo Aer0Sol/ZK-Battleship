@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ZK Battleship</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="axis.css">
+  <link rel="stylesheet" href="modal.css">
+</head>
+<body>
+  <main class="app-shell">
+    <header class="topbar">
+      <a class="brand" href="/">ZK<span>◈</span>BATTLESHIP</a>
+      <div class="secure-state"><i></i> ZK game gateway</div>
+      <button class="button button-quiet" id="new-match">New match</button>
+    </header>
+
+    <section class="hero">
+      <div>
+        <p class="eyebrow">PRIVATE STRATEGY · VERIFIED MOVES</p>
+        <h1>Place fleet.<br><em>Prove every shot.</em></h1>
+      </div>
+      <div class="match-card">
+        <span>Match status</span>
+        <strong id="match-status">Fleet deployment</strong>
+        <small id="status-detail">Place all five ships to begin.</small>
+      </div>
+    </section>
+
+    <section class="game-layout">
+      <aside class="control-panel">
+        <div class="panel-heading"><span>01</span><h2>Your fleet</h2></div>
+        <p class="muted">Select a ship, then choose its starting cell.</p>
+        <div class="fleet-list" id="fleet-list"></div>
+        <div class="control-row">
+          <button class="button button-secondary" id="rotate">Rotate <kbd>R</kbd></button>
+          <button class="button button-quiet" id="randomize">Randomize</button>
+        </div>
+        <button class="button button-quiet full" id="clear-board">Clear board</button>
+        <div class="proof-card">
+          <span class="proof-dot"></span>
+          <div><b>Poseidon commitment</b><small id="commitment-state">Pending fleet placement</small></div>
+        </div>
+      </aside>
+
+      <section class="board-panel">
+        <div class="board-title"><div><span>YOUR WATERS</span><strong>Defensive grid</strong></div><span class="badge">PRIVATE</span></div>
+        <div class="board-wrap"><div class="axis axis-top"><span>A</span><span>B</span><span>C</span><span>D</span><span>E</span><span>F</span><span>G</span><span>H</span><span>I</span><span>J</span></div><div class="axis axis-side"><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span><span>9</span><span>10</span></div><div class="grid" id="own-grid" aria-label="Your board"></div></div>
+      </section>
+
+      <section class="board-panel opponent-panel">
+        <div class="board-title"><div><span>OPPONENT WATERS</span><strong>Target grid</strong></div><span class="badge badge-warm" id="turn-badge">LOCKED</span></div>
+        <div class="board-wrap"><div class="axis axis-top"><span>A</span><span>B</span><span>C</span><span>D</span><span>E</span><span>F</span><span>G</span><span>H</span><span>I</span><span>J</span></div><div class="axis axis-side"><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span><span>9</span><span>10</span></div><div class="grid grid-target" id="target-grid" aria-label="Opponent board"></div></div>
+      </section>
+    </section>
+
+    <section class="bottom-bar">
+      <div class="event-log"><span class="eyebrow">ACTIVITY</span><p id="event-log">Select a vessel to start deployment.</p></div>
+      <button class="button button-secondary" id="view-proof" disabled>View latest proof</button>
+      <button class="button button-quiet" id="forfeit" disabled>Forfeit</button>
+      <button class="button button-primary" id="engage" disabled>Commit fleet &amp; engage</button>
+    </section>
+  </main>
+  <div class="modal" id="outcome-modal" hidden>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="outcome-title">
+      <p class="eyebrow" id="outcome-kicker">MATCH COMPLETE</p>
+      <h2 id="outcome-title"></h2>
+      <p id="outcome-detail"></p>
+      <button class="button button-primary" id="play-again">New match</button>
+    </div>
+  </div>
+  <div class="modal" id="proof-modal" hidden>
+    <div class="modal-card proof-modal" role="dialog" aria-modal="true" aria-labelledby="proof-title">
+      <p class="eyebrow">GROTH16 · VERIFIED BY GATEWAY</p>
+      <h2 id="proof-title">Shot proof</h2>
+      <pre id="proof-data"></pre>
+      <div class="proof-actions"><button class="button button-secondary" id="copy-proof">Copy JSON</button><button class="button button-quiet" id="close-proof">Close</button></div>
+    </div>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>
