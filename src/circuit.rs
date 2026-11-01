@@ -47,6 +47,10 @@ impl ConstraintSynthesizer<Fr> for ShotCircuit {
             (cell * &(FpVar::constant(Fr::one()) - cell)).enforce_equal(&FpVar::zero())?;
         }
 
+        let fleet_size: usize = crate::board::FLEET.iter().sum();
+        let ship_count = board_vars.iter().fold(FpVar::<Fr>::zero(), |acc, cell| acc + cell);
+        ship_count.enforce_equal(&FpVar::constant(Fr::from(fleet_size as u64)))?;
+
         let salt_var = FpVar::new_witness(cs.clone(), || {
             self.salt.ok_or(SynthesisError::AssignmentMissing)
         })?;

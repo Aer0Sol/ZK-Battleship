@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import os
 import secrets
 import sys
@@ -9,11 +10,14 @@ from aiohttp import WSMsgType, web
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "net"))
 
-from multiplayer import ZK_AVAILABLE, zk_commit, zk_prove, zk_verify
+from multiplayer import (
+    ZK_AVAILABLE, zk_commit, zk_prove, zk_verify,
+    Channel, generate_ecdh_keypair, derive_channel_keys,
+)
 
 WEB = Path(__file__).resolve().parent
 FLEET_SIZE = 17
-ASSETS = {"app.js", "axis.css", "modal.css", "styles.css"}
+ASSETS = {"app.js", "crypto.js", "axis.css", "modal.css", "styles.css"}
 
 
 class Room:
@@ -28,7 +32,8 @@ def valid_board(board):
 
 
 async def send(player, message):
-    await player["ws"].send_json(message)
+    payload = player["channel"].encrypt(message)
+    await player["ws"].send_json({"type": "secure", "payload": payload})
 
 
 async def start(room):
@@ -96,13 +101,27 @@ async def websocket(request):
         return web.Response(status=503, text="ZK artifacts are unavailable")
     ws = web.WebSocketResponse(max_msg_size=1 << 20)
     await ws.prepare(request)
+
+    private_key, public_bytes = generate_ecdh_keypair()
+    await ws.send_json({"type": "hello", "key": base64.b64encode(public_bytes).decode()})
+    hello = await ws.receive_json()
+    if hello.get("type") != "hello":
+        await ws.close()
+        return ws
+    peer_public_bytes = base64.b64decode(hello["key"])
+    client_key, server_key = derive_channel_keys(private_key, peer_public_bytes)
+    channel = Channel(send_key=server_key, recv_key=client_key)
+
     player = None
     room = None
     try:
         async for message in ws:
             if message.type != WSMsgType.TEXT:
                 continue
-            data = message.json()
+            envelope = message.json()
+            if envelope.get("type") != "secure":
+                continue
+            data = channel.decrypt(envelope["payload"])
             if data.get("type") == "join" and player is None:
                 room_id = data.get("room", "")
                 board = data.get("board")
@@ -115,7 +134,7 @@ async def websocket(request):
                 commitment = await asyncio.to_thread(zk_commit, board, salt)
                 if not commitment:
                     raise RuntimeError("commitment generation failed")
-                player = {"ws": ws, "board": board, "salt": salt, "commitment": commitment, "shots": set(), "hits": 0}
+                player = {"ws": ws, "channel": channel, "board": board, "salt": salt, "commitment": commitment, "shots": set(), "hits": 0}
                 room.players.append(player)
                 if len(room.players) == 1:
                     await send(player, {"type": "waiting"})
@@ -128,7 +147,7 @@ async def websocket(request):
             else:
                 raise ValueError("invalid message")
     except (RuntimeError, ValueError) as error:
-        await send(player or {"ws": ws}, {"type": "error", "message": str(error)})
+        await send(player or {"ws": ws, "channel": channel}, {"type": "error", "message": str(error)})
     finally:
         if room and player in room.players:
             room.players.remove(player)

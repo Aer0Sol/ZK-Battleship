@@ -7,7 +7,9 @@ mod tests {
 
     fn test_board() -> Vec<u8> {
         let mut b = vec![0u8; 100];
-        for i in 0..5 { b[i] = 1; }
+        for (row, len) in crate::board::FLEET.iter().enumerate() {
+            for col in 0..*len { b[row * 10 + col] = 1; }
+        }
         b
     }
 

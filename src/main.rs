@@ -4,168 +4,205 @@ mod commitment;
 mod tests;
 mod zk;
 
-use ark_bn254::Fr;
-use ark_ff::UniformRand;
-use board::{random_board, Board, Cell, Ship, FLEET, GRID};
+use ark_bn254::{Bn254, Fr};
+use ark_ff::{BigInteger, PrimeField};
+use ark_groth16::{PreparedVerifyingKey, Proof, ProvingKey, VerifyingKey};
+use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
+use base64::Engine;
+use num_bigint::BigUint;
 use rand::rngs::OsRng;
-use std::io::{self, Write as _};
+use serde::{Deserialize, Serialize};
+use std::fs;
+use std::io::{self, Read};
+use std::path::PathBuf;
 
-fn prompt(msg: &str) -> String {
-    print!("{msg}");
-    io::stdout().flush().unwrap();
-    let mut line = String::new();
-    io::stdin().read_line(&mut line).unwrap();
-    line.trim().to_string()
+fn build_dir() -> PathBuf {
+    PathBuf::from("build/rust")
 }
 
-fn parse_coord(s: &str) -> Option<(u8, u8)> {
-    let mut it = s.split_whitespace();
-    let r = it.next()?.parse::<u8>().ok()?;
-    let c = it.next()?.parse::<u8>().ok()?;
-    (r < GRID as u8 && c < GRID as u8).then_some((r, c))
+fn seed_path() -> PathBuf {
+    build_dir().join("seed.bin")
 }
 
-fn place_fleet_interactive() -> Board {
-    let names = ["Carrier (5)", "Battleship (4)", "Cruiser (3)", "Submarine (3)", "Destroyer (2)"];
-    let mut board = Board::new();
-    println!("\n=== Place your fleet ===");
-    println!("Format: row col h/v  (e.g. 3 4 h)\n");
+fn pk_path() -> PathBuf {
+    build_dir().join("proving_key.bin")
+}
 
-    for (&len, name) in FLEET.iter().zip(names.iter()) {
-        loop {
-            println!("{board}");
-            let raw = prompt(&format!("Place {name}: "));
-            let parts: Vec<&str> = raw.split_whitespace().collect();
-            if parts.len() != 3 { println!("Need: row col h|v"); continue; }
-            let Ok(row) = parts[0].parse::<usize>() else { println!("Bad row"); continue; };
-            let Ok(col) = parts[1].parse::<usize>() else { println!("Bad col"); continue; };
-            if row >= GRID || col >= GRID { println!("Out of bounds"); continue; }
-            let horiz = match parts[2] {
-                "h" | "H" => true, "v" | "V" => false,
-                _ => { println!("Use h or v"); continue; }
-            };
-            match board.place(Ship { row, col, len, horiz }) {
-                Ok(_) => break,
-                Err(e) => println!("{e}"),
-            }
+fn vk_path() -> PathBuf {
+    build_dir().join("verifying_key.bin")
+}
+
+fn read_stdin() -> String {
+    let mut buf = String::new();
+    io::stdin().read_to_string(&mut buf).expect("failed to read stdin");
+    buf
+}
+
+fn fr_to_decimal(f: &Fr) -> String {
+    BigUint::from_bytes_le(&f.into_bigint().to_bytes_le()).to_string()
+}
+
+fn fr_from_decimal(s: &str) -> Fr {
+    let n = BigUint::parse_bytes(s.as_bytes(), 10).expect("invalid decimal field element");
+    Fr::from_le_bytes_mod_order(&n.to_bytes_le())
+}
+
+fn bits_from_strings(board: &[String]) -> Vec<u8> {
+    board.iter().map(|s| if s == "1" { 1 } else { 0 }).collect()
+}
+
+fn base64_encode(bytes: &[u8]) -> String {
+    base64::engine::general_purpose::STANDARD.encode(bytes)
+}
+
+fn base64_decode(s: &str) -> Vec<u8> {
+    base64::engine::general_purpose::STANDARD
+        .decode(s)
+        .expect("invalid base64")
+}
+
+#[derive(Deserialize)]
+struct CommitInput {
+    board: Vec<String>,
+    salt: String,
+}
+
+#[derive(Deserialize)]
+struct ProveInput {
+    board: Vec<String>,
+    salt: String,
+    shot_row: String,
+    shot_col: String,
+}
+
+#[derive(Serialize, Deserialize)]
+struct ProofJson {
+    protocol: String,
+    curve: String,
+    data: String,
+}
+
+#[derive(Serialize)]
+struct ProveOutput {
+    commitment: String,
+    is_hit: String,
+    proof: ProofJson,
+    public: Vec<String>,
+}
+
+#[derive(Deserialize)]
+struct VerifyInput {
+    proof: ProofJson,
+    public: Vec<String>,
+}
+
+fn load_seed() -> [u8; 32] {
+    let bytes = fs::read(seed_path()).expect("missing seed, run `setup` first");
+    bytes.try_into().expect("corrupt seed file")
+}
+
+fn load_pk() -> ProvingKey<Bn254> {
+    let bytes = fs::read(pk_path()).expect("missing proving key, run `setup` first");
+    ProvingKey::deserialize_compressed(&bytes[..]).expect("corrupt proving key")
+}
+
+fn load_pvk() -> PreparedVerifyingKey<Bn254> {
+    let bytes = fs::read(vk_path()).expect("missing verifying key, run `setup` first");
+    let vk = VerifyingKey::deserialize_compressed(&bytes[..]).expect("corrupt verifying key");
+    zk::prepare_vk(&vk)
+}
+
+fn cmd_setup() {
+    fs::create_dir_all(build_dir()).expect("failed to create build directory");
+    let mut rng = OsRng;
+    let seed = commitment::public_seed(&mut rng);
+    let (pk, vk) = zk::setup(seed, &mut rng);
+
+    fs::write(seed_path(), seed).expect("failed to write seed");
+
+    let mut pk_bytes = Vec::new();
+    pk.serialize_compressed(&mut pk_bytes).expect("failed to serialize proving key");
+    fs::write(pk_path(), pk_bytes).expect("failed to write proving key");
+
+    let mut vk_bytes = Vec::new();
+    vk.serialize_compressed(&mut vk_bytes).expect("failed to serialize verifying key");
+    fs::write(vk_path(), vk_bytes).expect("failed to write verifying key");
+
+    println!("setup complete: {}", build_dir().display());
+}
+
+fn cmd_commit() {
+    let input: CommitInput = serde_json::from_str(&read_stdin()).expect("invalid input json");
+    let seed = load_seed();
+    let bits = bits_from_strings(&input.board);
+    let salt = fr_from_decimal(&input.salt);
+    let commitment = commitment::commit(&bits, salt, seed);
+    println!("{}", fr_to_decimal(&commitment));
+}
+
+fn cmd_prove() {
+    let input: ProveInput = serde_json::from_str(&read_stdin()).expect("invalid input json");
+    let seed = load_seed();
+    let pk = load_pk();
+    let bits = bits_from_strings(&input.board);
+    let salt = fr_from_decimal(&input.salt);
+    let row: u8 = input.shot_row.parse().expect("invalid shot_row");
+    let col: u8 = input.shot_col.parse().expect("invalid shot_col");
+
+    let commitment = commitment::commit(&bits, salt, seed);
+    let hit = bits[row as usize * 10 + col as usize] == 1;
+
+    let mut rng = OsRng;
+    let proof = zk::prove(&pk, bits, salt, commitment, row, col, hit, seed, &mut rng);
+
+    let mut proof_bytes = Vec::new();
+    proof.serialize_compressed(&mut proof_bytes).expect("failed to serialize proof");
+
+    let is_hit = if hit { "1" } else { "0" }.to_string();
+    let output = ProveOutput {
+        commitment: fr_to_decimal(&commitment),
+        is_hit: is_hit.clone(),
+        proof: ProofJson {
+            protocol: "groth16".to_string(),
+            curve: "bn254".to_string(),
+            data: base64_encode(&proof_bytes),
+        },
+        public: vec![fr_to_decimal(&commitment), row.to_string(), col.to_string(), is_hit],
+    };
+    println!("{}", serde_json::to_string(&output).expect("failed to serialize output"));
+}
+
+fn cmd_verify() {
+    let input: VerifyInput = serde_json::from_str(&read_stdin()).expect("invalid input json");
+    let pvk = load_pvk();
+
+    let result = (|| -> Option<bool> {
+        if input.public.len() != 4 {
+            return None;
         }
-    }
-    board
-}
+        let proof_bytes = base64_decode(&input.proof.data);
+        let proof = Proof::<Bn254>::deserialize_compressed(&proof_bytes[..]).ok()?;
+        let commitment = fr_from_decimal(&input.public[0]);
+        let row: u8 = input.public[1].parse().ok()?;
+        let col: u8 = input.public[2].parse().ok()?;
+        let is_hit = input.public[3] == "1";
+        Some(zk::verify(&pvk, commitment, row, col, is_hit, &proof))
+    })()
+    .unwrap_or(false);
 
-fn ai_shot(board: &Board, rng: &mut impl rand::Rng) -> (u8, u8) {
-    loop {
-        let r = rng.gen_range(0..GRID) as u8;
-        let c = rng.gen_range(0..GRID) as u8;
-        if matches!(board.cells[r as usize][c as usize], Cell::Empty | Cell::Ship) {
-            return (r, c);
-        }
-    }
-}
-
-fn hex_fr(f: &Fr) -> String {
-    use ark_ff::{BigInteger, PrimeField};
-    f.into_bigint().to_bytes_be().iter().map(|b| format!("{b:02x}")).collect()
+    println!("{result}");
 }
 
 fn main() {
-    let mut rng = OsRng;
-
-    println!("╔════════════════════════════════════════╗");
-    println!("║        ZK-BATTLESHIP  (Groth16)        ║");
-    println!("╚════════════════════════════════════════╝\n");
-
-    let seed = commitment::public_seed(&mut rng);
-    let seed_hex = seed.iter().map(|b| format!("{b:02x}")).collect::<String>();
-    println!("[*] Public seed: {seed_hex}");
-
-    println!("[*] Generating Groth16 keys…");
-    let (pk, vk) = zk::setup(seed, &mut rng);
-    let pvk = zk::prepare_vk(&vk);
-    println!("[*] Done.\n");
-
-    let p1_board = place_fleet_interactive();
-    let p1_salt = Fr::rand(&mut rng);
-    let p1_bits = p1_board.to_bits();
-    let p1_commit = commitment::commit(&p1_bits, p1_salt, seed);
-    println!("\n[*] Your commitment:      0x{}", hex_fr(&p1_commit));
-
-    let mut p2_board = random_board(&mut rng);
-    let p2_salt = Fr::rand(&mut rng);
-    let p2_bits = p2_board.to_bits();
-    let p2_commit = commitment::commit(&p2_bits, p2_salt, seed);
-    println!("[*] Opponent commitment:  0x{}\n", hex_fr(&p2_commit));
-
-    let mut p1_board = p1_board;
-    let mut tracking = Board::new();
-
-    println!("=== GAME START ===\n");
-
-    for turn in 1.. {
-        println!("\n── Turn {turn} ────────────────────────────────");
-
-        println!("{tracking}");
-        let (sr, sc) = loop {
-            let raw = prompt("Fire at row col > ");
-            match parse_coord(&raw) {
-                Some(rc) => break rc,
-                None => println!("Enter two numbers 0-9."),
-            }
-        };
-
-        let hit = p2_board.is_ship(sr as usize, sc as usize);
-        let proof = zk::prove(
-            &pk,
-            p2_bits.clone(),
-            p2_salt,
-            p2_commit,
-            sr,
-            sc,
-            hit,
-            seed,
-            &mut rng,
-        );
-
-        if !zk::verify(&pvk, p2_commit, sr, sc, hit, &proof) {
-            println!("[!] INVALID PROOF");
+    let command = std::env::args().nth(1).unwrap_or_default();
+    match command.as_str() {
+        "setup" => cmd_setup(),
+        "commit" => cmd_commit(),
+        "prove" => cmd_prove(),
+        "verify" => cmd_verify(),
+        _ => {
+            eprintln!("usage: zk-battleship <setup|commit|prove|verify>");
             std::process::exit(1);
-        }
-        println!("[ZK ✓] ({sr},{sc}) → {}", if hit { "HIT" } else { "miss" });
-        p2_board.record_shot(sr as usize, sc as usize);
-        tracking.cells[sr as usize][sc as usize] = if hit { Cell::Hit } else { Cell::Miss };
-
-        if p2_board.all_sunk() {
-            println!("\n🎉  You sunk all opponent ships — YOU WIN!\n");
-            break;
-        }
-
-        let (or, oc) = ai_shot(&p1_board, &mut rng);
-        println!("\nOpponent fires at ({or},{oc})");
-
-        let ohit = p1_board.is_ship(or as usize, oc as usize);
-        let oproof = zk::prove(
-            &pk,
-            p1_bits.clone(),
-            p1_salt,
-            p1_commit,
-            or,
-            oc,
-            ohit,
-            seed,
-            &mut rng,
-        );
-
-        if !zk::verify(&pvk, p1_commit, or, oc, ohit, &oproof) {
-            println!("[!] YOUR OWN PROOF IS INVALID");
-            std::process::exit(1);
-        }
-        println!("[ZK ✓] ({or},{oc}) → {}", if ohit { "HIT" } else { "miss" });
-        p1_board.record_shot(or as usize, oc as usize);
-        println!("\nYour fleet:\n{p1_board}");
-
-        if p1_board.all_sunk() {
-            println!("\n💀  All your ships were sunk — OPPONENT WINS.\n");
-            break;
         }
     }
 }
