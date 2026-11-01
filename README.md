@@ -85,7 +85,7 @@ defender proves, without revealing $b$ or $s$, that they know values matching th
 that the board is a legal fleet ($\sum_i b_i = 17$), and that the cell you shot at really does
 equal the hit/miss they're claiming:
 
-$$ b_{\text{row} \cdot 10 + \text{col}} = \text{is\_hit} $$
+$$ b_{\text{row} \cdot 10 + \text{col}} = \text{isHit} $$
 
 Groth16 turns that into a short, constant-size proof that the engine's own `verify` subcommand
 checks in milliseconds. So the math does the work and you need not rely simply on trust.
