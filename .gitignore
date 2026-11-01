@@ -1,5 +1,7 @@
 /target/
+/wasm-crypto/target/
 /build/
+/web/crypto_engine.wasm
 /circuits/node_modules/
 __pycache__/
 *.py[cod]

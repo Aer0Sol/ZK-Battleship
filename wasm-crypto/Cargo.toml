@@ -1,0 +1,15 @@
+[package]
+name = "zkb-wasm-crypto"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+chacha20poly1305 = { version = "0.10", default-features = false, features = ["alloc"] }
+
+[profile.release]
+opt-level = "z"
+lto = true
+panic = "abort"
