@@ -317,7 +317,7 @@ async function handleSocketMessage(message, room) {
     return;
   }
   if (message.type === "secure") {
-    receive(await state.channel.decrypt(message.payload));
+    receive(state.channel.decrypt(message.payload));
   }
 }
 

@@ -17,7 +17,7 @@ from multiplayer import (
 
 WEB = Path(__file__).resolve().parent
 FLEET_SIZE = 17
-ASSETS = {"app.js", "crypto.js", "crypto_engine.wasm", "axis.css", "modal.css", "styles.css"}
+ASSETS = {"app.js", "crypto.js", "axis.css", "modal.css", "styles.css"}
 
 
 class Room:
